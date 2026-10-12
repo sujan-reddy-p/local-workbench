@@ -6,3 +6,7 @@ __pycache__/
 .local-workbench/
 .local/
 .env
+build/
+dist/
+*.egg-info/
+.ruff_cache/

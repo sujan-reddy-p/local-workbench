@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import ipaddress
 import json
+import math
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
@@ -36,7 +37,7 @@ class OllamaClient:
             pass
         if parsed.scheme != "http" or not is_loopback:
             raise ValueError("Local Workbench only connects to an HTTP Ollama server on loopback")
-        if model.endswith(":cloud"):
+        if model.strip().casefold().endswith(("-cloud", ":cloud")):
             raise ValueError("Cloud models are disabled; choose a model running locally in Ollama")
         self.model = model
         self.host = host.rstrip("/")
@@ -82,12 +83,14 @@ class OllamaClient:
             result = json.loads(body["message"]["content"])
             category = result["category"]
             summary = result["summary"]
-            confidence = float(result["confidence"])
+            confidence = result["confidence"]
             notes = result["notes"]
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise OllamaError(f"Ollama response did not match the result schema: {exc}") from exc
         if not isinstance(category, str) or not isinstance(summary, str) or not isinstance(notes, str):
             raise OllamaError("Ollama returned non-text result fields")
-        if not 0 <= confidence <= 1:
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+            raise OllamaError("Ollama returned a non-numeric confidence")
+        if not math.isfinite(confidence) or not 0 <= confidence <= 1:
             raise OllamaError("Ollama returned confidence outside [0, 1]")
         return {"category": category[:120], "summary": summary[:4000], "confidence": confidence, "notes": notes[:1000]}

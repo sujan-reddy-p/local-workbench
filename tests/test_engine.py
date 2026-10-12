@@ -57,7 +57,10 @@ async def test_batch_persists_results_respects_cap_and_leaves_sources_unchanged(
     assert copied == 2
     assert (output / "Follow_up_needed" / "one.md").read_text(encoding="utf-8") == "private first"
     assert (output / "Follow_up_needed" / "two.txt").read_text(encoding="utf-8") == "private second"
+    existing = output / "Follow_up_needed" / "one.md"
+    existing.write_text("keep this export", encoding="utf-8")
     assert apply_category_copies(state, run_id)[1] == 0
+    assert existing.read_text(encoding="utf-8") == "keep this export"
     assert first.read_text(encoding="utf-8") == "private first"
 
 
@@ -119,3 +122,44 @@ async def test_adaptive_gate_rechecks_resource_budget_while_jobs_wait(monkeypatc
     await asyncio.wait_for(waiting, timeout=0.2)
     assert acquired.is_set()
     await gate.__aexit__(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_interrupted_running_item_is_requeued_and_processed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "note.md").write_text("note", encoding="utf-8")
+    state = tmp_path / "state"
+    store = JobStore(state)
+    run_id = store.create_run("classify", workspace, "test-model", [("note.md", "text")])
+    store.set_item(run_id, "note.md", "running")
+    monkeypatch.setattr(engine, "_suggest_parallelism", lambda _configured: 1)
+    provider = DelayedProvider()
+
+    resumed_id, _ = await run_batch("", workspace, state, run_id=run_id, provider=provider)
+
+    assert resumed_id == run_id
+    assert provider.calls == ["note.md"]
+    assert store.counts(run_id) == {"complete": 1}
+
+
+@pytest.mark.asyncio
+async def test_resume_marks_deleted_input_failed_without_calling_provider(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    missing = workspace / "gone.md"
+    missing.write_text("note", encoding="utf-8")
+    state = tmp_path / "state"
+    store = JobStore(state)
+    run_id = store.create_run("classify", workspace, "test-model", [("gone.md", "text")])
+    missing.unlink()
+    provider = DelayedProvider()
+
+    resumed_id, report = await run_batch("", workspace, state, run_id=run_id, provider=provider)
+
+    assert resumed_id == run_id
+    assert provider.calls == []
+    assert store.counts(run_id) == {"failed": 1}
+    assert "File no longer exists or is no longer supported" in report.read_text(encoding="utf-8")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,14 +39,13 @@ def scan_workspace(workspace: Path) -> list[WorkItem]:
             if filename.startswith("."):
                 continue
             path = current / filename
-            if path.is_symlink():
-                continue
             suffix = path.suffix.lower()
             kind = "text" if suffix in TEXT_EXTENSIONS else "image" if suffix in IMAGE_EXTENSIONS else ""
             if not kind:
                 continue
             try:
-                if path.stat().st_size > MAX_FILE_BYTES:
+                file_stat = path.lstat()
+                if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_size > MAX_FILE_BYTES:
                     continue
             except OSError:
                 continue
@@ -54,7 +54,19 @@ def scan_workspace(workspace: Path) -> list[WorkItem]:
 
 
 def read_item(item: WorkItem) -> str | bytes:
-    data = item.path.read_bytes()
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(item.path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError(f"Workspace item is no longer a regular file: {item.relative_path}")
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1
+            data = source.read(MAX_FILE_BYTES + 1)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if len(data) > MAX_FILE_BYTES:
+        raise ValueError(f"Workspace item exceeds {MAX_FILE_BYTES} bytes: {item.relative_path}")
     if item.kind == "image":
         return data
     return data[: MAX_TEXT_CHARS * 4].decode("utf-8", errors="replace")[:MAX_TEXT_CHARS]

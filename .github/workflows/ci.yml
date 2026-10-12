@@ -21,3 +21,4 @@ jobs:
       - run: python -m pip install -e '.[dev]'
       - run: ruff check local_workbench tests
       - run: pytest
+      - run: python -m build
