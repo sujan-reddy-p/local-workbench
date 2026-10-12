@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,7 @@ class DelayedProvider:
         self.max_active = max(self.max_active, self.active)
         self.calls.append(relative_path)
         try:
+            time.sleep(0.02)
             if self.fail_first and len(self.calls) == 1:
                 raise RuntimeError("temporary local model failure")
             return {"category": "Follow-up needed", "summary": f"{goal}: {relative_path}", "confidence": 0.93, "notes": "Checked"}
@@ -44,7 +47,7 @@ async def test_batch_persists_results_respects_cap_and_leaves_sources_unchanged(
     run_id, report = await run_batch("triage follow-ups", workspace, state, max_parallel=2, provider=provider)
 
     store = JobStore(state)
-    assert provider.max_active <= 2
+    assert provider.max_active == 2
     assert store.counts(run_id) == {"complete": 2}
     assert "Follow-up needed" in report.read_text(encoding="utf-8")
     assert first.read_text(encoding="utf-8") == "private first"
@@ -94,3 +97,25 @@ def test_parallelism_adapts_to_memory_and_cpu_without_exceeding_cap(monkeypatch:
     Memory.available = 2 * 1024 ** 3
     monkeypatch.setattr(psutil, "cpu_percent", lambda interval=None: 0)
     assert engine._suggest_parallelism(4) == 1
+
+
+@pytest.mark.asyncio
+async def test_adaptive_gate_rechecks_resource_budget_while_jobs_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    budget = {"slots": 2}
+    monkeypatch.setattr(engine, "_suggest_parallelism", lambda _configured: budget["slots"])
+    gate = engine.AdaptiveGate(2)
+    await gate.__aenter__()
+    budget["slots"] = 1
+    acquired = asyncio.Event()
+
+    async def wait_for_slot() -> None:
+        await gate.__aenter__()
+        acquired.set()
+
+    waiting = asyncio.create_task(wait_for_slot())
+    await asyncio.sleep(0)
+    assert not acquired.is_set()
+    await gate.__aexit__(None, None, None)
+    await asyncio.wait_for(waiting, timeout=0.2)
+    assert acquired.is_set()
+    await gate.__aexit__(None, None, None)
