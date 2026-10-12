@@ -24,7 +24,7 @@ On Linux, install Ollama using its official instructions, then download the mode
 ollama pull gemma3:4b
 ```
 
-Model downloads use disk space and inference consumes RAM/VRAM. Start with one worker; the application adapts downward under memory pressure and never exceeds the configured cap of four requests.
+Model downloads use disk space and inference consumes RAM/VRAM. Start with one worker; the application adapts concurrency to available memory and CPU load, and never exceeds the configured cap of four requests.
 
 ## Install and run
 

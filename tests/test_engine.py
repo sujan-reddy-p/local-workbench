@@ -80,11 +80,17 @@ async def test_failed_work_resumes_from_sqlite_without_reprocessing_success(tmp_
     assert "temporary local model failure" not in report.read_text(encoding="utf-8")
 
 
-def test_parallelism_never_exceeds_cap_or_drops_below_one(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parallelism_adapts_to_memory_and_cpu_without_exceeding_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     class Memory:
-        available = 2 * 1024 ** 3
+        available = 16 * 1024 ** 3
 
     import psutil
     monkeypatch.setattr(psutil, "virtual_memory", lambda: Memory())
+    monkeypatch.setattr(psutil, "cpu_percent", lambda interval=None: 0)
+    assert engine._suggest_parallelism(2) == 2
+    assert engine._suggest_parallelism(4) == 3
+    monkeypatch.setattr(psutil, "cpu_percent", lambda interval=None: 95)
     assert engine._suggest_parallelism(4) == 1
-    assert engine._suggest_parallelism(1) == 1
+    Memory.available = 2 * 1024 ** 3
+    monkeypatch.setattr(psutil, "cpu_percent", lambda interval=None: 0)
+    assert engine._suggest_parallelism(4) == 1

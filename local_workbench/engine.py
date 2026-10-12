@@ -13,7 +13,7 @@ from .store import JobStore
 
 
 class AdaptiveGate:
-    """Allow only as many concurrent Ollama requests as current memory permits."""
+    """Allow concurrent Ollama requests only when live system resources permit."""
 
     def __init__(self, user_cap: int) -> None:
         self.user_cap = user_cap
@@ -40,11 +40,14 @@ Progress = Callable[[int, int, str], None]
 
 
 def _suggest_parallelism(configured: int, model_reserve_gb: float = 5.0) -> int:
-    """Reduce inference concurrency under memory pressure; never exceed user's cap."""
+    """Limit request concurrency by available memory and current CPU pressure."""
     try:
         import psutil
         available_gb = psutil.virtual_memory().available / (1024 ** 3)
-        return max(1, min(configured, int(max(1.0, (available_gb - 1.0) / model_reserve_gb))))
+        memory_cap = max(1, min(configured, int(max(1.0, (available_gb - 1.0) / model_reserve_gb))))
+        if psutil.cpu_percent(interval=None) >= 85:
+            return 1
+        return memory_cap
     except (ImportError, OSError, AttributeError):
         return 1
 
