@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,6 +20,7 @@ class JobStore:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.state_dir / "jobs.sqlite3"
         with self._connect() as db:
+            db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS runs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,12 +42,20 @@ class JobStore:
                 );
             """)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         db = sqlite3.connect(self.db_path, timeout=30)
         db.row_factory = sqlite3.Row
-        db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA foreign_keys=ON")
-        return db
+        try:
+            yield db
+        except BaseException:
+            db.rollback()
+            raise
+        else:
+            db.commit()
+        finally:
+            db.close()
 
     def create_run(self, goal: str, workspace: Path, model: str, items: list[tuple[str, str]]) -> int:
         with self._connect() as db:
