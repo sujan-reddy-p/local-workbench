@@ -1,8 +1,10 @@
 # Local Workbench
 
-Local Workbench is a local-first batch analyst for folders of text files and images. Give it a goal; a local Ollama model classifies and summarizes each supported file independently. Review the report, then explicitly approve any categorized copies.
+Local Workbench turns one natural-language instruction into a resumable batch of **per-file analysis jobs**. Choose your own criteria; a local Ollama model applies them to supported text files, images, or a mixed folder. Each file gets a category, summary, confidence score, and optional notes, followed by a report you can review and optional category-based copies.
 
-It is a focused, safe batch tool—not a general-purpose computer-use agent. It has no shell-command, move, or delete tools and does not reason across an entire collection.
+Its breadth comes from the task you describe—not a menu of fixed classifiers. Its scope is intentionally narrower than an autonomous computer agent: it analyzes files and can copy categorized results after approval, but cannot choose arbitrary tools or perform unrelated computer actions.
+
+The same instruction is applied independently to each file. It does not combine evidence across files or decide what should happen next based on earlier results.
 
 ## Screenshots
 
@@ -12,26 +14,36 @@ The screens below show the TUI and the read-only report review step. The report 
 
 ![Report review with an explicit copy approval](docs/screenshots/report-review.png)
 
-## What it does
+## What kinds of work fit?
 
-- Processes supported files as resumable jobs, with results and failures saved in SQLite.
-- Uses a bounded number of Ollama requests; its concurrency heuristic considers system memory and CPU pressure, not GPU memory.
-- Produces a Markdown report with a category, summary, confidence, and notes for each completed file.
-- Lets you review that report before copying categorized files to a separate export folder. Originals are never moved, changed, or overwritten.
+Give it the rubric in natural language and, if useful, preferred category labels; otherwise the model proposes a label per file. Example tasks:
 
-Example tasks:
+| Work pattern | Example instruction |
+| --- | --- |
+| **Classify by your criteria** | “Group these support notes by their main issue; summarize each note.” |
+| **Triage against a rule** | “Mark logs that show database timeouts as `investigate`; mark the rest `other`; include the relevant evidence.” |
+| **Describe and sort images** | “Separate photos of a single dog from crowded dog scenes; label unrelated images `ignore`.” |
+| **Summarize technical material** | “For each Markdown design note, identify the component and summarize the main decision.” |
+| **Find key facts in a file** | “For each receipt image, report the vendor, date, and total in its summary; flag anything unreadable.” |
+| **Create reviewable category folders** | “Label each screenshot by the product area it shows.” After reviewing the report, approve copies organized by the model’s category labels. |
 
-- Group customer feedback notes by complaint and summarize each note.
-- Triage incident logs by service or error type, with a short evidence summary.
-- Categorize screenshots or photos by visible subject or scene.
-- Sort project notes into topics and produce a per-file summary.
+These are examples of **per-file analysis**, not guarantees that the model will be correct. Fact extraction appears as ordinary report text; the app does not create custom columns, calculate across rows, or verify facts against external sources.
 
-### Supported files and limits
+## How a run works
 
-Text: Markdown, TXT, CSV/TSV, JSON, YAML, XML, HTML, logs, INI, TOML, and Python source.  
-Images: PNG, JPG/JPEG, WebP, and BMP; use a vision-capable model.
+1. Choose a workspace folder and describe the task once.
+2. The scanner selects supported files; each is analyzed independently by Ollama and saved as a durable job.
+3. Local Workbench writes a Markdown report with each file’s category, confidence, summary, and any failure.
+4. Inspect the report in the TUI. Only after your approval does it copy completed files into category folders. Originals stay in place.
 
-Each run scans at most 1,000 files. Files over 8 MiB are skipped; text sent for analysis is capped at 32,000 characters per file. PDFs, spreadsheets, archives, and arbitrary computer actions are not supported.
+The queue can resume interrupted work and retry failed files. Request concurrency is bounded and adapts to system-memory and CPU-pressure heuristics; it does not inspect GPU memory.
+
+### Supported inputs and limits
+
+- **Text:** `.md`, `.txt`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`, `.xml`, `.html`, `.log`, `.ini`, `.toml`, `.py`.
+- **Images:** `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`; the selected model must support vision.
+- CSV and TSV are analyzed as text files, not queried row by row. Each run scans at most 1,000 files; files over 8 MiB are skipped and text is capped at 32,000 characters per file.
+- PDFs, spreadsheets, archives, audio/video, cross-file comparisons, custom structured exports, and arbitrary shell or desktop actions are outside the current scope.
 
 ## Quick start
 
@@ -47,7 +59,7 @@ ollama pull gemma3:4b
 local-workbench --workspace ~/Documents
 ```
 
-Ollama must be running locally. The TUI accepts a natural-language task. To run without the TUI:
+Ensure the Ollama server is running first (if your install does not start it automatically, run `ollama serve` in another terminal). The TUI accepts a natural-language task. To run without the TUI:
 
 ```bash
 local-workbench --workspace ~/Documents \
